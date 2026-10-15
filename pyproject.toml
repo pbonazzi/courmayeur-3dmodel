@@ -1,0 +1,20 @@
+[project]
+name = "courmayeur-terrain-model"
+version = "1.0.0"
+description = "Printable 3D relief model of Courmayeur and the Mont Blanc massif from open lidar data"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "numpy",
+    "scipy",
+    "pillow",
+    "pyproj",
+    "tifffile",
+    "imagecodecs",
+    "inflate64",
+    "manifold3d",
+    "fonttools",
+]
+
+[tool.uv]
+package = false

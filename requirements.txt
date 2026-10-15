@@ -1,0 +1,9 @@
+numpy
+scipy
+pillow
+pyproj
+tifffile
+imagecodecs
+inflate64
+manifold3d
+fonttools

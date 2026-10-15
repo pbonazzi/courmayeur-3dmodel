@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+
+# Downloaded source data (recreate with: python fetch_data.py)
+data/
+
+# Generated models and viewer data (recreate with build_tiles.py, export_color.py, cnc_export.py)
+results/

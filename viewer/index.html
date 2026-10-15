@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Courmayeur Relief Model</title>
+<style>
+:root{
+  --bg:#e9ecee; --stage:#dfe3e6; --fg:#1d2328; --muted:#5d6872; --panel:rgba(246,248,249,.88); --line:#c3cad0; --accent:#2f6f8f;
+  --body:system-ui,-apple-system,"Segoe UI",sans-serif; --mono:ui-monospace,"DejaVu Sans Mono",monospace; --display:Georgia,"Times New Roman",serif;
+}
+@media (prefers-color-scheme: dark){:root{--bg:#13181c;--stage:#182025;--fg:#e6eaed;--muted:#97a3ad;--panel:rgba(22,29,34,.88);--line:#33404a;--accent:#7cb8d6;color-scheme:dark}}
+html,body{height:100%;margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--fg);font:14px var(--body);overflow:hidden}
+#stage{position:fixed;inset:0;background:radial-gradient(ellipse at 50% 40%,var(--stage),var(--bg) 75%)}
+#stage canvas{display:block;width:100%;height:100%;touch-action:none}
+.panel{background:var(--panel);backdrop-filter:blur(8px);border:1px solid var(--line);border-radius:6px}
+.sheet{position:fixed;top:16px;left:16px;max-width:320px;padding:14px 16px;display:grid;gap:10px}
+h1{font:700 1.45rem/1.1 var(--display);margin:0}
+.sub{color:var(--muted);font-size:.85rem;margin:0;line-height:1.4}
+dl{display:grid;grid-template-columns:auto 1fr;gap:4px 14px;margin:0;font-size:.8rem}
+dt{color:var(--muted);text-transform:uppercase;letter-spacing:.06em;font-size:.68rem;align-self:center}
+dd{margin:0;font-family:var(--mono);font-variant-numeric:tabular-nums}
+.controls{position:fixed;left:16px;right:16px;bottom:16px;display:flex;flex-wrap:wrap;gap:10px;justify-content:center;pointer-events:none}
+.controls>*{pointer-events:auto}
+.seg{display:flex;overflow:hidden}
+.seg button{font:500 .8rem var(--body);color:var(--fg);background:transparent;border:0;padding:8px 12px;cursor:pointer}
+.seg button[aria-pressed="true"]{background:var(--accent);color:var(--bg)}
+button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.field{display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:.8rem}
+.field output{font-family:var(--mono);min-width:3.2em}
+select{font:inherit;color:var(--fg);background:transparent;border:1px solid var(--line);border-radius:4px;padding:3px 6px}
+select option{background:var(--bg)}
+#labels{position:fixed;inset:0;pointer-events:none}
+.lab{pointer-events:auto;cursor:pointer;position:absolute;transform:translate(-50%,-100%);font-size:.72rem;font-weight:500;white-space:nowrap;padding:2px 6px;border-radius:3px;background:var(--panel);border:1px solid var(--line)}
+.lab::after{content:"";position:absolute;left:50%;top:100%;width:1px;height:14px;background:var(--fg);opacity:.6}
+.lab span{font-family:var(--mono);color:var(--muted);margin-left:4px}
+.lab.tun{border-color:#ff5a1f}
+.lab.tun::after{background:#ff5a1f}
+.lab.peak{font-family:var(--display);font-size:.8rem}
+.hint{position:fixed;right:16px;top:16px;font-size:.72rem;color:var(--muted);text-align:right;line-height:1.5}
+#status{position:fixed;inset:0;display:grid;place-items:center;font-size:.95rem;color:var(--muted);pointer-events:none}
+#status.err{color:#c0392b;pointer-events:auto;padding:24px;text-align:center}
+</style>
+</head>
+<body>
+<div id="stage"></div>
+<div id="labels"></div>
+<div id="status">Loading terrain…</div>
+<div class="sheet panel">
+  <h1>Courmayeur &amp; the Mont Blanc massif</h1>
+  <p class="sub">The four print tiles in <code>final/</code>. "Final print files" shows the exact OBJ meshes.</p>
+  <dl>
+    <dt>Footprint</dt><dd id="d-size">–</dd>
+    <dt>Tiles</dt><dd id="d-tiles">–</dd>
+    <dt>Height</dt><dd id="d-height">–</dd>
+    <dt>Detail</dt><dd id="d-step">–</dd>
+    <dt>Relief</dt><dd id="d-relief">–</dd>
+    <dt>Showing</dt><dd id="d-tris">–</dd>
+  </dl>
+</div>
+<div class="hint">Drag to orbit · scroll to zoom · right-drag to pan<br>Click a label to zoom in · R reset view · S split tiles · L labels · X x-ray</div>
+<div class="controls">
+  <div class="seg panel" role="group" aria-label="Surface">
+    <button id="m-terrain" aria-pressed="true">Terrain colours</button>
+    <button id="m-print" aria-pressed="false">Printed plastic</button>
+    <button id="m-wire" aria-pressed="false">Mesh</button>
+  </div>
+  <div class="seg panel" role="group" aria-label="Display">
+    <button id="split" aria-pressed="true">Pull tiles apart</button>
+    <button id="lab-on" aria-pressed="true">Labels</button>
+    <button id="xray" aria-pressed="false">X-ray tunnel</button>
+    <button id="final" aria-pressed="false">Final print files</button>
+    <button id="fronttext" aria-pressed="false">Front texts</button>
+  </div>
+  <label class="field panel" for="only">Tile
+    <select id="only"><option value="all">All four</option><option>NW</option><option>NE</option><option>SW</option><option>SE</option></select>
+  </label>
+  <label class="field panel" for="res">Detail
+    <select id="res"><option value="4">Quick (0.8 mm)</option><option value="2" selected>High (0.4 mm)</option><option value="1">Full (0.2 mm, as printed)</option></select>
+  </label>
+  <label class="field panel" for="ex">Vertical ×<input id="ex" type="range" min="1" max="2.5" step="0.1" value="1"><output id="exo">1.0</output></label>
+</div>
+<script src="lib/three.min.js"></script>
+<script src="lib/OrbitControls.js"></script>
+<script>
+(async function(){
+const NOCACHE='?v='+Date.now();
+const status=document.getElementById('status');
+let meta, H;
+try{
+  meta=await (await fetch('../results/tiles/viewer_meta.json'+NOCACHE)).json();
+  H=new Uint16Array(await (await fetch('../results/tiles/viewer_heights.bin'+NOCACHE)).arrayBuffer());
+  try{const r=await fetch('../results/tiles/viewer_tunnel.json'+NOCACHE);if(r.ok)window.TUN=await r.json();}catch(e){}
+  try{const r=await fetch('../results/tiles/viewer_bore_patches.json'+NOCACHE);if(r.ok)window.PATCHES=await r.json();}catch(e){}
+  try{const r=await fetch('../results/tiles/viewer_colors.bin'+NOCACHE);if(r.ok)window.GRIDCOL=new Uint8Array(await r.arrayBuffer());}catch(e){}
+  try{const r=await fetch('../results/tiles/viewer_features.bin'+NOCACHE);if(r.ok)window.FEAT=new Uint8Array(await r.arrayBuffer());}catch(e){}
+}catch(e){
+  status.className='err';
+  status.innerHTML='Could not load the terrain data.<br>Start the viewer with <code>python3 viewer/serve.py</code> from the project folder<br>(browsers block local files opened directly).';
+  return;
+}
+const N=meta.n, SIZE=meta.size_mm, half=SIZE/2, TN=meta.tiles, BASE=meta.base_mm;
+const toM=mm=>(mm-BASE)/meta.mm_per_m+meta.zmin_m;
+let hmax=0;for(let i=0;i<H.length;i++)if(H[i]>hmax)hmax=H[i];
+document.getElementById('d-size').textContent=`${SIZE} × ${SIZE} mm`;
+document.getElementById('d-tiles').textContent=`${TN*TN} × ${SIZE/TN} × ${SIZE/TN} mm`;
+document.getElementById('d-height').textContent=`${(hmax/100).toFixed(0)} mm (${BASE} mm base)`;
+document.getElementById('d-step').textContent=`${meta.step_mm} mm = ${(meta.step_mm/meta.mm_per_m*meta.vert_exag).toFixed(1)} m`;
+document.getElementById('d-relief').textContent=`${Math.round(meta.zmin_m)} – ${Math.round(toM(hmax/100))} m`;
+
+const stage=document.getElementById('stage');
+const renderer=new THREE.WebGLRenderer({antialias:true,alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setClearColor(0x000000,0);
+stage.appendChild(renderer.domElement);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(35,1,1,6000);
+const controls=new THREE.OrbitControls(camera,renderer.domElement);
+controls.enableDamping=true;controls.maxPolarAngle=Math.PI*0.49;controls.minDistance=40;controls.maxDistance=2000;
+let fly=null;
+function flyTo(cam,tgt){fly={cam:cam.clone(),tgt:tgt.clone()};}
+function resetView(){flyTo(new THREE.Vector3(330,540,760),new THREE.Vector3(0,30,0));}
+camera.position.set(330,540,760);controls.target.set(0,30,0);
+resetView();
+scene.add(new THREE.HemisphereLight(0xf2f6ff,0x6b6258,0.55));
+const sun=new THREE.DirectionalLight(0xffffff,0.85);sun.position.set(-300,400,-150);scene.add(sun);
+
+const stops=[[900,0x5f7d4a],[1500,0x7f9459],[2100,0x9a9877],[2700,0x8c8478],[3200,0xd9dde2],[4800,0xfbfcfd]];
+const C=new THREE.Color(),tmp=new THREE.Color();
+function ramp(m){for(let k=1;k<stops.length;k++){if(m<=stops[k][0]){const t=(m-stops[k-1][0])/(stops[k][0]-stops[k-1][0]);return C.set(stops[k-1][1]).lerp(tmp.set(stops[k][1]),Math.max(0,t));}}return C.set(stops[stops.length-1][1]);}
+const FEAT_COL=[0,0x3b3f44,0xb5462f,0xf2b705];   // road, building, highlighted building (gold)
+const matT=new THREE.MeshLambertMaterial({vertexColors:true});cutAway(matT);
+const matP=new THREE.MeshStandardMaterial({color:0xd8d2c8,roughness:0.85,metalness:0});cutAway(matP);
+const matW=new THREE.MeshBasicMaterial({color:0x2f6f8f,wireframe:true});
+const wallMat=new THREE.MeshLambertMaterial({color:0x8a7f72,side:THREE.DoubleSide});cutAway(wallMat);
+const tunMat=new THREE.MeshBasicMaterial({color:0xff5a1f});
+// Where the tunnel bore opens (portals, tile seams) the heightfield can't show a horizontal hole,
+// so the real bored mesh from build_tiles.py is drawn there and the heightfield is cut away.
+const PATCHES=window.PATCHES||[];
+const boxes=PATCHES.map(p=>new THREE.Vector4(p.box[0]-half,half-p.box[3],p.box[2]-half,half-p.box[1]));
+const MAXB=16;while(boxes.length<MAXB)boxes.push(new THREE.Vector4(0,0,0,0));
+function cutAway(mat){mat.onBeforeCompile=sh=>{
+  sh.uniforms.uBoxes={value:boxes};sh.uniforms.uNB={value:Math.min(PATCHES.length,MAXB)};
+  sh.vertexShader='varying vec3 vObj;\n'+sh.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvObj=position;');
+  sh.fragmentShader='varying vec3 vObj;\nuniform vec4 uBoxes['+MAXB+'];\nuniform int uNB;\n'+sh.fragmentShader.replace('#include <clipping_planes_fragment>',
+    'for(int i=0;i<'+MAXB+';i++){if(i>=uNB)break;vec4 b=uBoxes[i];if(vObj.x>b.x+1e-4&&vObj.x<b.z-1e-4&&vObj.z>b.y+1e-4&&vObj.z<b.w-1e-4)discard;}\n#include <clipping_planes_fragment>');};}
+const patchMat={terrain:new THREE.MeshLambertMaterial({vertexColors:true,side:THREE.DoubleSide}),
+  print:new THREE.MeshStandardMaterial({color:0xd8d2c8,roughness:0.85,metalness:0,side:THREE.DoubleSide})};
+const TUN=window.TUN||null;
+// tunnel points in scene coords, grouped by the tile they run through
+function byTile(path){const out={};let prev=null,prevTile=null;
+  for(const [x,y,z] of path){const pt=new THREE.Vector3(x-half,z,half-y),tile=(pt.z<0?'N':'S')+(pt.x<0?'W':'E');
+    (out[tile]=out[tile]||[]);
+    if(prevTile&&tile!==prevTile){const m=prev.clone().lerp(pt,0.5);out[prevTile].push(m);out[tile].push(m.clone());}
+    out[tile].push(pt);prev=pt;prevTile=tile;}
+  return out;}
+const tunPieces=TUN?byTile(TUN.path):{};
+// the part of the bore that is fully under rock, drawn from inside (dark) so a look into a portal
+// shows tunnel, not the far side of the model
+let buriedPieces={};
+if(TUN){const R0=TUN.radius_mm||1,P=TUN.path,cov=P.map(([x,y,z])=>{const r=Math.round((N-1)-y/meta.step_mm),c=Math.round(x/meta.step_mm);
+    return r>=0&&r<N&&c>=0&&c<N&&H[r*N+c]/100>z+R0+0.05;});
+  const i0=cov.indexOf(true),i1=cov.lastIndexOf(true);if(i0>=0)buriedPieces=byTile(P.slice(i0,i1+1));}
+const tunInside=new THREE.MeshBasicMaterial({color:0x0c0c0c,side:THREE.BackSide});
+const RUNOUT=(window.TUN&&window.TUN.runout_points)||0;   // open-air run-out points at each end of TUN.path
+function distToBore(x,y,z,covered){if(!TUN)return 1e9;let best=1e9;const P=TUN.path;
+  for(let i=0;i<P.length-1;i++){const inRun=i<RUNOUT||i>=P.length-1-RUNOUT;if(covered!==undefined&&inRun===covered)continue;const a=P[i],b=P[i+1];const ax=a[0]-half,ay=a[2],az=half-a[1],bx=b[0]-half,by=b[2],bz=half-b[1];
+    const vx=bx-ax,vy=by-ay,vz=bz-az;let t=((x-ax)*vx+(y-ay)*vy+(z-az)*vz)/(vx*vx+vy*vy+vz*vz);t=Math.max(0,Math.min(1,t));
+    const dx=x-ax-t*vx,dy=y-ay-t*vy,dz=z-az-t*vz;const d=dx*dx+dy*dy+dz*dz;if(d<best)best=d;}return Math.sqrt(best);}
+function addPatches(g){for(const p of PATCHES){const cx=(p.box[0]+p.box[2])/2-half,cz=half-(p.box[1]+p.box[3])/2;
+    if(((cz<0?'N':'S')+(cx<0?'W':'E'))!==g.userData.name)continue;
+    const V=p.verts,Fc=p.faces,pos=new Float32Array(Fc.length*3);
+    for(let i=0;i<Fc.length;i++){const k=Fc[i]*3;pos[3*i]=V[k]-half;pos[3*i+1]=V[k+2];pos[3*i+2]=half-V[k+1];}
+    const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));geo.computeVertexNormals();
+    const nr=geo.attributes.normal.array,col=new Float32Array(pos.length),R=(TUN&&TUN.radius_mm)||0.8,tile=SIZE/TN;
+    for(let i=0;i<pos.length/3;i++){const x=pos[3*i],y=pos[3*i+1],z=pos[3*i+2];
+      const onEdge=[x+half,half-z].some(u=>Math.abs(u/tile-Math.round(u/tile))<1e-3/tile);
+      const gc=Math.round((x+half)/meta.step_mm);
+      const row=Math.round((N-1)-(half-z)/meta.step_mm), f=window.FEAT&&row>=0&&row<N&&gc>=0&&gc<N?window.FEAT[row*N+gc]:0;
+      if(distToBore(x,y,z,true)<R+0.03)C.set(0x141414);            // bore inside the mountain
+      else if(distToBore(x,y,z,false)<R+0.03)C.set(FEAT_COL[1]);  // open-air run-out = road into the portal
+      else if(onEdge&&Math.abs(nr[3*i+1])<0.5)C.set(0x8a7f72);
+      else if(f)C.set(FEAT_COL[f]);
+      else{const m=toM(y);ramp(m);}
+      col[3*i]=C.r;col[3*i+1]=C.g;col[3*i+2]=C.b;}
+    geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+    const m=new THREE.Mesh(geo,surface===matP?patchMat.print:patchMat.terrain);m.userData.patch=true;g.add(m);}}
+// ---- final print files: the exact meshes written to final/*.obj (incl. tunnel bore) ----
+let finalMode=false;const finalCache={};
+async function loadFinal(name){if(finalCache[name])return finalCache[name];
+  const buf=await (await fetch(`../results/tiles/viewer_mesh_${name}.bin`+NOCACHE)).arrayBuffer();
+  const [nv,nf]=new Int32Array(buf,0,2);
+  let col=null;try{const r=await fetch(`../results/tiles/viewer_mesh_${name}_col.bin`+NOCACHE);if(r.ok)col=new Uint8Array(await r.arrayBuffer());}catch(e){}
+  return finalCache[name]={v:new Float32Array(buf,8,nv*3),f:new Uint32Array(buf,8+nv*12,nf*3),col:col&&col.length===nv*3?col:null};}
+function finalMesh(name,data){
+  const tr=name[0]==='N'?0:1,tc=name[1]==='W'?0:1,tile=SIZE/TN,st=meta.step_mm,nv=data.v.length/3;
+  const pos=new Float32Array(nv*3);
+  for(let i=0;i<nv;i++){const X=data.v[3*i]+tc*tile,Y=data.v[3*i+1]+(TN-1-tr)*tile;
+    pos[3*i]=X-half;pos[3*i+1]=data.v[3*i+2];pos[3*i+2]=half-Y;}
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  geo.setIndex(new THREE.BufferAttribute(data.f,1));geo.computeVertexNormals();
+  const nr=geo.attributes.normal.array,col=new Float32Array(nv*3),F=window.FEAT;
+  for(let i=0;i<nv;i++){const lx=data.v[3*i],ly=data.v[3*i+1],z=data.v[3*i+2];
+    const X=lx+tc*tile,Y=ly+(TN-1-tr)*tile,cf=X/st,rf=(N-1)-Y/st,c=Math.round(cf),r=Math.round(rf);
+    const onGrid=Math.abs(cf-c)<1e-3&&Math.abs(rf-r)<1e-3;
+    const surf=onGrid?H[r*N+c]/100:0;
+    const onSide=Math.min(lx,ly,tile-lx,tile-ly)<1e-3;
+    const inWall=Math.min(lx,ly,tile-lx,tile-ly);
+    if(!onGrid&&inWall>1e-3&&inWall<1.0&&z<40)C.set(0xf1e6c8);           // engraved text in the side walls
+    else if(z<1e-4||(onSide&&(!onGrid||z<surf-1e-3)))C.set(0x8a7f72);     // base and sides
+    else if(!onGrid||z<surf-0.01)C.set(0x141414);                          // tunnel bore
+    else{const f=F?F[r*N+c]:0;
+      if(f)C.set(FEAT_COL[f]);
+      else{const m=toM(z);ramp(m);const steep=1-nr[3*i+1];if(steep>0.35&&m>1800)C.lerp(tmp.set(0x6e6863),Math.min(1,(steep-0.35)*2.2));}}
+    col[3*i]=C.r;col[3*i+1]=C.g;col[3*i+2]=C.b;}
+  if(data.col)for(let i=0;i<nv*3;i++)col[i]=data.col[i]/255;     // exact colours of the full-colour print files
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const m=new THREE.Mesh(geo,surface===matP?patchMat.print:surface===matW?matW:patchMat.terrain);m.userData.patch=true;m.userData.final=true;return m;}
+function showFinal(g,on){g.children.forEach(o=>{if(o.userData.final)o.visible=on;else if(o.userData.tunnel)o.visible=xray;
+  else if(o.userData.tunnelInside)o.visible=!on&&!xray;else o.visible=!on;});}
+async function setFinal(on){finalMode=on;btn('final').setAttribute('aria-pressed',String(on));
+  if(on){status.hidden=false;status.className='';status.textContent='Loading the final print files…';
+    for(const g of tiles){if(!g.children.some(o=>o.userData.final)){const d=await loadFinal(g.userData.name);g.add(finalMesh(g.userData.name,d));}showFinal(g,true);}
+    status.hidden=true;}
+  else for(const g of tiles)showFinal(g,false);
+  document.getElementById('d-tris').textContent=on?`${(Object.values(finalCache).reduce((a,d)=>a+d.f.length/3,0)/1e6).toFixed(1)} M triangles (print files)`:document.getElementById('d-tris').dataset.preview||'';}
+function addTunnel(g){const pts=tunPieces[g.userData.name];if(!pts||pts.length<2)return;
+  const curve=new THREE.CatmullRomCurve3(pts);
+  const m=new THREE.Mesh(new THREE.TubeGeometry(curve,pts.length*3,1.2,10,false),tunMat);m.renderOrder=-1;m.visible=xray;m.userData.tunnel=true;g.add(m);
+  const bp=buriedPieces[g.userData.name];
+  if(bp&&bp.length>1){const R0=(TUN.radius_mm||1)*1.01;
+    const mi=new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(bp),bp.length*3,R0,16,false),tunInside);
+    mi.visible=!xray;mi.userData.tunnelInside=true;g.add(mi);}}
+let xray=false;
+function setXray(on){xray=on;for(const m of [matT,matP,wallMat,patchMat.terrain,patchMat.print]){m.transparent=on;m.opacity=on?0.28:1;m.depthWrite=!on;m.needsUpdate=true;}
+  for(const t of tiles)t.traverse(o=>{if(o.userData.tunnel)o.visible=on;if(o.userData.tunnelInside)o.visible=!on&&!finalMode;});
+  btn('xray').setAttribute('aria-pressed',String(on));}
+let surface=matT;
+const model=new THREE.Group();scene.add(model);
+let tiles=[];
+
+function buildTile(name,r0,c0,span,stride){
+  const n=span/stride+1, pos=new Float32Array(n*n*3), col=new Float32Array(n*n*3), step=meta.step_mm;
+  for(let r=0;r<n;r++)for(let c=0;c<n;c++){const i=r*n+c,R=r0+r*stride,Cc=c0+c*stride;
+    pos[3*i]=Cc*step-half;pos[3*i+1]=H[R*N+Cc]/100;pos[3*i+2]=R*step-half;}
+  const idx=new Uint32Array((n-1)*(n-1)*6);let k=0;
+  for(let r=0;r<n-1;r++)for(let c=0;c<n-1;c++){const a=r*n+c,b=a+1,d=a+n,e=d+1;idx[k++]=a;idx[k++]=d;idx[k++]=b;idx[k++]=b;idx[k++]=d;idx[k++]=e;}
+  const geo=new THREE.BufferGeometry();geo.setAttribute('position',new THREE.BufferAttribute(pos,3));geo.setIndex(new THREE.BufferAttribute(idx,1));geo.computeVertexNormals();
+  const nrm=geo.attributes.normal.array;
+  const F=window.FEAT&&window.FEAT.length===N*N?window.FEAT:null;
+  for(let i=0;i<n*n;i++){
+    let f=0;
+    if(F){const R=r0+Math.floor(i/n)*stride,Cc=c0+(i%n)*stride;   // strongest feature in this vertex's block
+      for(let a=0;a<stride&&R+a<N;a++)for(let b=0;b<stride&&Cc+b<N;b++){const q=F[(R+a)*N+Cc+b];if(q>f)f=q;}}
+    const GC=window.GRIDCOL&&window.GRIDCOL.length===N*N*3?window.GRIDCOL:null;
+    if(f){C.set(FEAT_COL[f]);}
+    else if(GC){const R=r0+Math.floor(i/n)*stride,Cc=c0+(i%n)*stride,q=3*(R*N+Cc);C.setRGB(GC[q]/255,GC[q+1]/255,GC[q+2]/255);}
+    else{const m=toM(pos[3*i+1]);ramp(m);const steep=1-nrm[3*i+1];
+      if(steep>0.35&&m>1800)C.lerp(tmp.set(0x6e6863),Math.min(1,(steep-0.35)*2.2));}
+    col[3*i]=C.r;col[3*i+1]=C.g;col[3*i+2]=C.b;}
+  geo.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const ring=[];for(let c=0;c<n;c++)ring.push(c);for(let r=1;r<n;r++)ring.push(r*n+n-1);
+  for(let c=n-2;c>=0;c--)ring.push((n-1)*n+c);for(let r=n-2;r>0;r--)ring.push(r*n);
+  const wp=new Float32Array(ring.length*18);let w=0;
+  for(let q=0;q<ring.length;q++){const a=ring[q],b=ring[(q+1)%ring.length];
+    const ax=pos[3*a],ay=pos[3*a+1],az=pos[3*a+2],bx=pos[3*b],by=pos[3*b+1],bz=pos[3*b+2];
+    wp.set([ax,ay,az,ax,0,az,bx,by,bz,bx,by,bz,ax,0,az,bx,0,bz],w);w+=18;}
+  const wg=new THREE.BufferGeometry();wg.setAttribute('position',new THREE.BufferAttribute(wp,3));wg.computeVertexNormals();
+  const g=new THREE.Group(),t=new THREE.Mesh(geo,surface);
+  const bt=new THREE.Mesh(new THREE.PlaneGeometry(span*step,span*step),wallMat);bt.rotation.x=Math.PI/2;
+  bt.position.set((c0+span/2)*step-half,0,(r0+span/2)*step-half);
+  g.add(t,new THREE.Mesh(wg,wallMat),bt);
+  const cx=(c0+span/2)*step-half, cz=(r0+span/2)*step-half;
+  g.userData={name,terrain:t,dir:new THREE.Vector3(Math.sign(cx),0,Math.sign(cz)),tris:idx.length/3};
+  return g;
+}
+const NAMES=[['NW','NE'],['SW','SE']];
+function build(stride){
+  for(const t of tiles){model.remove(t);t.traverse(o=>{if(o.geometry)o.geometry.dispose();});}
+  tiles=[];const span=(N-1)/TN;let tris=0;
+  for(let tr=0;tr<TN;tr++)for(let tc=0;tc<TN;tc++){const g=buildTile(NAMES[tr]?.[tc]||`${tr}${tc}`,tr*span,tc*span,span,stride);addTunnel(g);addPatches(g);model.add(g);tiles.push(g);tris+=g.userData.tris;}
+  document.getElementById('d-tris').textContent=document.getElementById('d-tris').dataset.preview=`${(tris/1e6).toFixed(1)} M triangles`;
+  applyOnly();
+  if(typeof finalMode!=='undefined'&&finalMode)setFinal(true);
+}
+const shadow=new THREE.Mesh(new THREE.PlaneGeometry(SIZE*1.7,SIZE*1.7),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.08}));
+shadow.rotation.x=-Math.PI/2;shadow.position.y=-0.5;scene.add(shadow);
+
+let gap=12,gapTarget=12,only='all';
+const labWrap=document.getElementById('labels');
+const labs=meta.landmarks.map(m=>{const el=document.createElement('div');el.className='lab'+(m.peak?' peak':'');
+  el.innerHTML=`${m.name}<span>${m.elev.toLocaleString('en').replace(',',' ')} m</span>`;labWrap.appendChild(el);
+  const p=new THREE.Vector3(m.x-half,m.z,half-m.y);
+  const tile=(p.z<0?'N':'S')+(p.x<0?'W':'E');
+  const l={el,p,tile,dir:new THREE.Vector3(Math.sign(p.x),0,Math.sign(p.z))};
+  el.onclick=()=>focusOn(l);
+  return l;});
+if(TUN)for(const pt of TUN.portals){const [x,y,z]=pt.xyz;const el=document.createElement('div');el.className='lab tun';
+  el.innerHTML=`${pt.name}<span>${pt.elev.toLocaleString('en').replace(',',' ')} m</span>`;labWrap.appendChild(el);
+  const p=new THREE.Vector3(x-half,z,half-y);const l={el,p,tile:(p.z<0?'N':'S')+(p.x<0?'W':'E'),dir:new THREE.Vector3(Math.sign(p.x),0,Math.sign(p.z))};
+  // look into the mouth from outside: camera out along the bore's run-out
+  const P=TUN.path,first=TUN.portals.indexOf(pt)===0,a=P[first?0:P.length-1],b=P[first?12:P.length-13];
+  const out=new THREE.Vector3(a[0]-b[0],0,-(a[1]-b[1])).normalize();l.camOff=out.multiplyScalar(30).add(new THREE.Vector3(0,14,0));
+  el.onclick=()=>focusOn(l);labs.push(l);}
+function focusOn(l){const t=l.p.clone();t.y*=model.scale.y;t.addScaledVector(l.dir,gap/2);
+  flyTo(t.clone().add(l.camOff||new THREE.Vector3(28,22,40)),t);}
+let showLabels=true;const v=new THREE.Vector3();
+function placeLabels(){const W=innerWidth,Hh=innerHeight;for(const l of labs){
+  if(!showLabels||(only!=='all'&&only!==l.tile)){l.el.hidden=true;continue;}
+  v.copy(l.p);v.y=v.y*model.scale.y+6;v.addScaledVector(l.dir,gap/2);v.project(camera);
+  l.el.hidden=v.z>1;l.el.style.left=((v.x+1)/2*W)+'px';l.el.style.top=((1-v.y)/2*Hh-14)+'px';}}
+function applyOnly(){for(const t of tiles)t.visible=only==='all'||t.userData.name===only;}
+
+function resize(){renderer.setSize(innerWidth,innerHeight,false);camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();}
+addEventListener('resize',resize);resize();
+
+const btn=id=>document.getElementById(id);
+function setSurface(m,id){surface=m;for(const t of tiles){t.userData.terrain.material=m;
+    t.traverse(o=>{if(o.userData.patch){o.material=m===matP?patchMat.print:m===matW?matW:patchMat.terrain;}});}
+  for(const b of ['m-terrain','m-print','m-wire'])btn(b).setAttribute('aria-pressed',String(b===id));}
+btn('m-terrain').onclick=()=>setSurface(matT,'m-terrain');
+btn('m-print').onclick=()=>setSurface(matP,'m-print');
+btn('m-wire').onclick=()=>setSurface(matW,'m-wire');
+const toggleLabels=()=>{showLabels=!showLabels;btn('lab-on').setAttribute('aria-pressed',String(showLabels));};
+const toggleSplit=()=>{gapTarget=gapTarget?0:12;btn('split').setAttribute('aria-pressed',String(!!gapTarget));};
+btn('lab-on').onclick=toggleLabels;btn('final').onclick=()=>setFinal(!finalMode);
+btn('fronttext').onclick=async()=>{if(!finalMode)await setFinal(true);gapTarget=0;btn('split').setAttribute('aria-pressed','false');
+  flyTo(new THREE.Vector3(0,30,560),new THREE.Vector3(0,14,260));};btn('xray').onclick=()=>setXray(!xray);
+if(!TUN)btn('xray').hidden=true;btn('split').onclick=toggleSplit;
+btn('only').onchange=e=>{only=e.target.value;applyOnly();};
+btn('res').onchange=e=>{status.textContent='Building mesh…';status.hidden=false;setTimeout(()=>{build(+e.target.value);status.hidden=true;},30);};
+btn('ex').oninput=e=>{model.scale.y=+e.target.value;btn('exo').textContent=(+e.target.value).toFixed(1);};
+addEventListener('keydown',e=>{if(e.target.tagName==='SELECT'||e.target.tagName==='INPUT')return;
+  if(e.key==='r'||e.key==='R')resetView();if(e.key==='s'||e.key==='S')toggleSplit();if(e.key==='l'||e.key==='L')toggleLabels();if((e.key==='x'||e.key==='X')&&TUN)setXray(!xray);});
+
+const qs=new URLSearchParams(location.search);
+if(qs.has('xray')&&TUN)setXray(true);
+if(qs.get('res'))btn('res').value=qs.get('res');
+build(+btn('res').value);status.hidden=true;
+if(qs.get('cam')&&qs.get('tgt')){const c=qs.get('cam').split(',').map(Number),t=qs.get('tgt').split(',').map(Number);
+  camera.position.set(...c);controls.target.set(...t);fly=null;}
+if(qs.has('final'))setFinal(true);
+if(qs.has('front'))btn('fronttext').onclick();
+const fq=qs.get('focus');if(fq){const l=labs.find(l=>l.el.textContent.startsWith(fq));if(l){focusOn(l);if(qs.has('instant')){camera.position.copy(fly.cam);controls.target.copy(fly.tgt);fly=null;}}}
+controls.addEventListener('start',()=>{fly=null;});
+(function loop(){requestAnimationFrame(loop);gap+=(gapTarget-gap)*0.12;
+  if(fly){camera.position.lerp(fly.cam,0.12);controls.target.lerp(fly.tgt,0.12);
+    if(camera.position.distanceTo(fly.cam)<0.5&&controls.target.distanceTo(fly.tgt)<0.5)fly=null;}
+  for(const t of tiles)t.position.copy(t.userData.dir).multiplyScalar(gap/2);
+  controls.update();renderer.render(scene,camera);placeLabels();})();
+})();
+</script>
+</body>
+</html>
